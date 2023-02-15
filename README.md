@@ -21,39 +21,34 @@ Macro to set main video source input composition on a Webex device based on whic
 1. Load the Javascript code included in the auto_source_composer.js file in this repository into a new Macro in the Macro editor of the Cisco Webex device you wish to use.
 2. Before activating the macro, modify the `config` constant if needed as follows:
 
-`MICROPHONE_CONNECTORS` is an array that should contain all microphones connected to the codec that we want to consider for the automatic switching logic. Default is all 8 mics in a Codec Pro but you can reduce it to only those being used for which the macro will turn on VuMeters and monitor.
+`monitorMics` is an array that should contain all microphones connected to the codec that we want to consider for the automatic switching logic. Default is all 8 mics in a Codec Pro but you can reduce it to only those being used for which the macro will turn on VuMeters and monitor.
 
 `compositions` is an array of objects that specify which connectors to use to compose the video inputs and which microphones need to have activity detected to trigger the new composition. Below is an example:
 
 ```
-      {
-        name: 'Composition1',          // Name for your composition
-        mics: [1,2],
-        connector_A: 1,
-        connector_B: 2,
-        connector_C: 3,
-        connector_D: 4,
-        layout: 'Prominent'
-      }
+    {
+      name: 'Composition1',     // Name for your composition
+      mics: [1, 2],             // Mics you want to associate with this composition
+      connectors: [1,2,3,4],    // Video input connector Ids to use
+      layout: 'Prominent'       // Layout to use
+    }
 ```
 
-You can have as many as you want, but the Codec Pro only has 8 mic connectors so you would only make sense to specify a maximum of 8. The default in the code is four compositions each triggered by 2 microphones. You can change the content of the `mics` array to specify which microphones are associated to a particular composition. That array can also have up to 8 values but it is more typical it will have 1 or 2.  
-The `layout` constant key in the object specifies the type of layout to select when using the `xapi.Command.Video.Input.SetMainVideoSource()` command to set the new composition as the main video source.  
-Do not change the names of any of the keys in the object nor the number of keys since the macro looks for the ones described here explicitely. You can only change the number of overall composition objects and the number of members of the `mics` array for each as well as the values for each `connector_X` (is being letters A through D) , the layout to use and the name of the composition.
+You can have as many compositions as you want, but the Codec Pro only has 8 mic connectors so you would only make sense to specify a maximum of 8. The default in the code is four compositions each triggered by 2 microphones. You can change the content of the `mics` array to specify which microphones are associated to a particular composition. That array can also have up to 8 values but it is more typical it will have 1 or 2.  
+The value for the `connectors` key in the object is an array of connector IDs to use in the `xapi.Command.Video.Input.SetMainVideoSource()` command. They will be specified when issuing the command to change layouts in the same order as you configure here. There is a maximum of 4 connector IDs you can specify.
+The value for the `layout` key in the object specifies the type of layout to select when using the `xapi.Command.Video.Input.SetMainVideoSource()` command to set the new composition as the main video source.  
+Do not change the names of any of the keys in the object nor the number of keys since the macro looks for the ones described here explicitely.
 
 You also need to specify at least one coposition that contains microphone index 0 which the macro uses to handle silence conditions or the mute button being pressed.
 This is an example that has been configured by default for you to specify what happens when there is no audio:
 
 ```
-      {
-        name: 'NoAudio',          // Name for your composition
-        mics: [0],
-        connector_A: 1,
-        connector_B: 2,
-        connector_C: 3,
-        connector_D: 4,
-        layout: 'Equal'
-      }
+    {
+      name: 'NoAudio',          // Name for your composition
+      mics: [0],
+      connectors: [1,2,3,4],
+      layout: 'Equal'
+    }
 ```
 
 `SIDE_BY_SIDE_TIME` is the time to wait for silence before setting composition for silent mode. Defaut is 10000ms (10 seconds)
