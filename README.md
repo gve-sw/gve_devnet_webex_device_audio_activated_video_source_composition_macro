@@ -2,6 +2,13 @@
 
 Macro to set main video source input composition on a Webex device based on which microphones detect audio activity.
 
+3/23/23 Updates:
+
+- Added Auto Top N composition feature
+- Added sample macros to install on Webex devices being used as video inputs (i.e. Webex Room Bar) so that they stay in full-screen self-view while speakertracking and never go standby.
+- Added QuadCam support.
+- Support for re-initializing the macro after a camera firmware update
+
 ## Contacts
 
 - Gerardo Chaves (gchaves@cisco.com)
@@ -52,6 +59,22 @@ This is an example that has been configured by default for you to specify what h
     }
 ```
 
+If you wish to enable the automatic composition of the top N video sources where people are speaking, you need to modify the `auto_top_speakers` constant and set it's `enabled` attribute to `true`. You also need to specify the maximum amount of segments to consider as top speakers (maximum of 4) in the `max_speakers` attribute as well as the video connectors to compose from _in the proper order_ you want them layed out on the screen. You use the `default_connectos` for this and the macro will automatically use that list of connectors and the layout specified in the `layout` attribute to set the main video source, but it will eliminate the video connectors for the segments where there is not enough noise to go above the `MICROPHONE_HIGH` threshold explained below.  
+This is an example that has been configured by default for you to modify if you want to turn on top N automatic composition:
+
+```
+const auto_top_speakers = {
+  enabled: false, // if set to true, the macro will dynamically create composition of top speaker segments
+  max_speakers: 2, // specify maximum number of top speaker segments to compose
+  default_connectors: [1, 2, 3, 4], // specify connectos to use for top speakers composition in order
+  layout: 'Equal'
+}
+```
+
+You also might want to modify the following constants:
+
+`QUAD_CAM_ID` is the connector ID of where the QuadCam is connected on this codec. If no QuadCam, set to 0. Default is 1.
+
 `SIDE_BY_SIDE_TIME` is the time to wait for silence before setting composition for silent mode. Defaut is 10000ms (10 seconds)
 
 `NEW_SPEAKER_TIME` is the time to wait before switching to a new speaker. Defautl is 2000ms (2 seconds)
@@ -62,9 +85,11 @@ in the console messages for the macro when it reports 'Low Triggered'. Adjust hi
 `MICROPHONEHIGH` represents the microphone high threshold for vuMeter readings. You can see the average value it is calculating to trigger the behavior
 in the console messages for the macro when it reports 'High Triggered'. Adjust lower if the macro is having trouble detecting audio activity. Default value is 25.
 
-3. Activate the macro
+3. If any of the connector inputs you are using correspond to video coming from another Cisco Room device such as a Room Bar, you might want to install the macro included in the `fixed_input_main_output.js` file on that codec and enable it so that it is always sending over HDMI output 1 the input from it's main camera and never goes on standby. It also turns on SpeakerTrack on that device. As long as you keep that macro running , it will fix those settings everytime the device restarts/reboots. If you wish to revert the effects of that macro, just install the macro in file `reset_fixed_input.js` and run it once on that device, and make sure you turn off the fixed_input_main_output macro.
 
-4. On the Touch 10 or Navigator device of you codec, touch the "Auto Source Control" custom panel button and set the "Video Source Composing" toggle button to "Auto". You can always come back to the custom panel and turn it off.
+4. Activate the macro
+
+5. On the Touch 10 or Navigator device of you codec, touch the "Auto Source Control" custom panel button and set the "Video Source Composing" toggle button to "Auto". You can always come back to the custom panel and turn it off.
 
 > If you are unfamiliar with Cisco Room device macros, [this](https://help.webex.com/en-us/np8b6m6/Use-of-Macros-with-Room-and-Desk-Devices-and-Webex-Boards) is a good article to get started.
 

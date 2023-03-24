@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2021 Cisco and/or its affiliates.
+Copyright (c) 2023 Cisco and/or its affiliates.
 This software is licensed to you under the terms of the Cisco Sample
 Code License, Version 1.1 (the "License"). You may obtain a copy of the
 License at
@@ -22,41 +22,53 @@ import xapi from 'xapi';
 // INSTALLER SETTINGS
 /////////////////////////////////////////////////////////////////////////////////////////
 
+
 const config = {
   monitorMics: [1, 2, 3, 4, 5, 6, 7, 8], // input connectors associated to the microphones being used in the room
   compositions: [        // Create your array of compositions
     {
       name: 'Composition1',     // Name for your composition
       mics: [1, 2],             // Mics you want to associate with this composition
-      connectors: [1,2,3,4],    // Video input connector Ids to use
+      connectors: [1, 2, 3, 4],    // Video input connector Ids to use
       layout: 'Prominent'       // Layout to use
     },
     {
       name: 'Composition2',     // Name for your composition
       mics: [3, 4],
-      connectors: [2,1,3,4],
+      connectors: [2, 1, 3, 4],
       layout: 'Prominent'
     },
     {
       name: 'Composition3',     // Name for your composition
       mics: [5, 6],
-      connectors: [3,1,2,4],
+      connectors: [3, 1, 2, 4],
       layout: 'Prominent'
     },
     {
       name: 'Composition4',     // Name for your composition
       mics: [7, 8],
-      connectors: [4,1,2,3],
+      connectors: [4, 1, 2, 3],
       layout: 'Prominent'
     },
     {
       name: 'NoAudio',          // Name for your composition
       mics: [0],
-      connectors: [1,2,3,4],
+      connectors: [1, 2, 3, 4],
       layout: 'Equal'
     }
+
   ]
 }
+
+const auto_top_speakers = {
+  enabled: false, // if set to true, the macro will dynamically create composition of top speaker segments
+  max_speakers: 2, // specify maximum number of top speaker segments to compose
+  default_connectors: [1, 2, 3, 4], // specify connectos to use for top speakers composition in order
+  layout: 'Equal'
+}
+
+const QUAD_CAM_ID = 1; // If the codec has a Quadcam, specify the connector ID here. Otherwise set to 0
+
 
 /*
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -87,6 +99,20 @@ const MICROPHONEHIGH = 25;
 + DO NOT EDIT ANYTHING BELOW THIS LINE                                  +
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 */
+
+
+
+var top_speakers_connectors = [];
+var mic_connectors_map = {}
+// create a map of microphones to corresponding main video connector
+config.compositions.forEach(compose => {
+  compose.mics.forEach(mic => {
+    mic_connectors_map[mic] = compose.connectors[0];
+  })
+});
+var comp_sets_array = [] // array of top speaker compositions to keep track of for last speaker value
+
+
 
 const PANEL_control =
   `<Extensions>
@@ -154,7 +180,7 @@ xapi.Command.UserInterface.Extensions.Panel.Save({ PanelId: 'panel_vid_source_co
 
 let micArrays = {};
 // Initialize our micArray variable
-config.monitorMics.forEach( mic => micArrays[mic.toString()] = [0, 0, 0, 0])
+config.monitorMics.forEach(mic => micArrays[mic.toString()] = [0, 0, 0, 0])
 
 let lowWasRecalled = false;
 let lastActiveHighInput = 0;
@@ -255,10 +281,10 @@ async function startAutomation() {
   allowCameraSwitching = true;
 
   //registering vuMeter event handler
-  micHandler = xapi.Event.Audio.Input.Connectors.Microphone.on( event => {
+  micHandler = xapi.Event.Audio.Input.Connectors.Microphone.on(event => {
     //adding protection for mis-configured mics
     if (typeof micArrays[event.id[0]] != 'undefined') {
-      micArrays[event.id[0]].pop();
+      micArrays[event.id[0]].shift();
       micArrays[event.id[0]].push(event.VuMeter);
 
       // checking on manual_mode might be unnecessary because in manual mode,
@@ -272,11 +298,11 @@ async function startAutomation() {
   // start VuMeter monitoring
   console.log(`Turning on VuMeter monitoring for mics [${config.monitorMics}]`)
 
-  config.monitorMics.forEach(mic=>{
+  config.monitorMics.forEach(mic => {
     xapi.Command.Audio.VuMeter.Start(
-    { ConnectorId: mic, ConnectorType: 'Microphone', IntervalMs: 500, Source: 'AfterAEC' });
+      { ConnectorId: mic, ConnectorType: 'Microphone', IntervalMs: 500, Source: 'AfterAEC' });
   })
-  
+
   // set toggle button on custom panel to reflect that automation is turned on.
   setWidget('widget_toggle_auto', 'on')
 }
@@ -291,15 +317,13 @@ function stopAutomation() {
   console.log("Stopping all VuMeters...");
   xapi.Command.Audio.VuMeter.StopAll({});
 
-  //TODO: check to see if when we stop automation we really want to switch to connectorID 1
-
   // Get the default main video source and apply it as current
   xapi.Config.Video.DefaultMainSource.get()
-  .then(result => {
-    console.log(`Switching MainVideoSource to Default Source [${result}]`);
-    xapi.Command.Video.Input.SetMainVideoSource({ ConnectorId: result });
-  })
-  
+    .then(result => {
+      console.log(`Switching MainVideoSource to Default Source [${result}]`);
+      xapi.Command.Video.Input.SetMainVideoSource({ ConnectorId: result });
+    })
+
   // using proper way to de-register handlers
   micHandler();
   micHandler = () => void 0;
@@ -314,21 +338,22 @@ function stopAutomation() {
 /////////////////////////////////////////////////////////////////////////////////////////
 
 function checkMicLevelsToSwitchCamera() {
+
   // make sure we've gotten enough samples from each mic in order to do averages
   if (allowCameraSwitching) {
     // figure out which of the inputs has the highest average level then perform logic for that input *ONLY* if allowCameraSwitching is true
-    let array_key = largestMicValue();
-    let array = [];
-    array = micArrays[array_key];
-    // get the average level for the currently active input
-    let average = averageArray(array);
-    //get the input number as an int since it is passed as a string (since it is a key to a dict)
-    let input = parseInt(array_key);
+
+    // first let's check for top N mics with topNMicValue() which will also fill out needed
+    // composition to use to set main video source 
+    let topMics = topNMicValue();
+    let input = topMics[0];
+    let average = topMics[1]
+
     // someone is speaking
     if (average > MICROPHONEHIGH) {
       // start timer to prevent Side-by-Side mode too quickly
       restartSideBySideTimer();
-      if (input > 0) {
+      if (input != 0) {
         lowWasRecalled = false;
         // no one was talking before
         if (lastActiveHighInput === 0) {
@@ -374,44 +399,128 @@ async function makeCompositionSwitch(activeMic, average) {
     console.log(`Input = ${activeMic} | Average = ${average}`);
     console.log("-------------------------------------------------");
   }
-  else {
+  else if (activeMic == 0) {
     console.log("-------------------------------------------------");
     console.log("Low Triggered");
     console.log(`Average = ${average}`);
     console.log("-------------------------------------------------");
   }
+  else {
+    console.log("-------------------------------------------------");
+    console.log("Multi-High Triggered");
+    console.log(`Input = ${activeMic} | Average = ${average}`);
+    console.log("-------------------------------------------------");
+  }
 
-  // Apply the composition for active mic
-  config.compositions.forEach(compose =>{
-    if(compose.mics.includes(activeMic)){
-      console.log(`Switching to composition = ${compose.name}`);
-      console.log(`Setting Video Input to connectors [${compose.connectors}]  and Layout: ${compose.layout}`)
-      xapi.Command.Video.Input.SetMainVideoSource(
-        {
-          ConnectorId: compose.connectors,
-          Layout: compose.layout
-        });
+  if (activeMic >= 0) {
+    // Apply the composition for active mic. Continue doing this if there is only one ActiveMic with positive value
+    config.compositions.forEach(compose => {
+      if (compose.mics.includes(activeMic)) {
+        console.log(`Switching to composition = ${compose.name}`);
+        console.log(`Setting Video Input to connectors [${compose.connectors}]  and Layout: ${compose.layout}`)
+        if (QUAD_CAM_ID != 0) pauseSpeakerTrack();
+        xapi.Command.Video.Input.SetMainVideoSource(
+          {
+            ConnectorId: compose.connectors,
+            Layout: compose.layout
+          });
+        if (QUAD_CAM_ID != 0)
+          if (compose.connectors.length == 1 && compose.connectors.includes(QUAD_CAM_ID)) resumeSpeakerTrack();
         return;
-    }
-  })
+      }
+    })
+  }
+  else {
+    // Here we switch to the previously prepared composition that corresponds to 
+    // the top N active speakers. 
+    console.log(`Switching to auto-generated top N speakers composition.`);
+    console.log(`Setting Video Input to connectors [${top_speakers_connectors}]  and Layout: ${auto_top_speakers.layout}`)
+    xapi.Command.Video.Input.SetMainVideoSource(
+      {
+        ConnectorId: top_speakers_connectors,
+        Layout: auto_top_speakers.layout
+      });
+
+  }
 
 }
 
-function largestMicValue() {
-  // figure out which of the inputs has the highest average level and return the corresponding key
-  let currentMaxValue = 0;
-  let currentMaxKey = '';
-  let theAverage = 0;
 
+function topNMicValue() {
+  let theAverage = 0;
+  let averagesMap = {}
+  let input = 0;
+  let average = 0;
+
+  //NOTE: micArrays is indexed with string representations of integers that are the mic connector ID
   config.monitorMics.forEach(mic => {
-    theAverage = averageArray(micArrays[mic.toString()]); 
-    if (theAverage >= currentMaxValue) {
-      currentMaxKey = mic.toString();
-      currentMaxValue = theAverage;
-    }
+    theAverage = averageArray(micArrays[mic.toString()]);
+    averagesMap[mic] = theAverage;
   })
 
-  return currentMaxKey;
+  let entries = Object.entries(averagesMap)
+  let sorted = entries.sort((a, b) => a[1] - b[1]);
+
+  //capture top mic and average in case we need to return just that below
+  input = parseInt(sorted[sorted.length - 1][0])
+  average = parseInt(sorted[sorted.length - 1][1])
+
+  // check for auto_top_speakers disabled or less than 2 max_speakers to just return top mic and value
+  if (sorted.length > 0) {
+    if (!auto_top_speakers.enabled || auto_top_speakers.max_speakers < 2) return [input, average]
+  } else { return [0, 0]; }
+
+  // now that we know that auto_top_speakers is enabled and looking for 2 or more top speaker segments,
+  // we iterate through averages focusing only on those above MICROPHONEHIGH
+  // and map those to the corresponding connector and remove duplciates
+  // then check to see if more than one top speakers are active to calculate the new layout
+  let sorted_high_connectors = []
+  let theSet = new Set()
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    let mic_id = sorted[i][0]
+    let mic_avg = sorted[i][1]
+    let connector = mic_connectors_map[mic_id]
+    if (mic_avg > MICROPHONEHIGH) {
+      // push connector only if not already there
+      if (!sorted_high_connectors.includes(connector)) {
+        sorted_high_connectors.push(connector)
+        theSet.add(connector)
+      };
+    }
+  }
+
+  // if after removing duplicates we have less than 2 entries, just return the originally expected values
+  // of highest input and it's average
+  if (sorted_high_connectors.length < 2) return [input, average]
+
+  // now set the top_speakers_connectors gobal variable as a filtered version of auto_top_speakers.default_connectors
+  top_speakers_connectors = []
+  auto_top_speakers.default_connectors.forEach(connector => {
+    if (sorted_high_connectors.includes(connector)) top_speakers_connectors.push(connector)
+  })
+
+  // now calculate and return a negative value
+  // that corresponds with the unique unordered set of connectors that are being used
+  let comp_index = 0
+
+  for (let i = 0; i < comp_sets_array.length; i++) {
+    if (difference(comp_sets_array[i], theSet).size == 0) { comp_index = -(i + 1); break; }
+  }
+  if (comp_index == 0) {
+    comp_sets_array.push(theSet)
+    comp_index = -(comp_sets_array.length);
+  }
+  input = comp_index
+
+  return [input, average]
+}
+
+function difference(setA, setB) {
+  const _difference = new Set(setA);
+  for (const elem of setB) {
+    _difference.delete(elem);
+  }
+  return _difference;
 }
 
 function averageArray(arrayIn) {
@@ -419,27 +528,36 @@ function averageArray(arrayIn) {
   for (var i = 0; i < arrayIn.length; i++) {
     sum = sum + parseInt(arrayIn[i], 10);
   }
-  let avg = (sum / arrayIn.length) * arrayIn.length;
+  let avg = (sum / arrayIn.length);
   return avg;
 }
 
-function setWidget(widgetId, value){
+function setWidget(widgetId, value) {
   console.log(`Setting Widget [${widgetId}] to [${value}]`)
   xapi.Command.UserInterface.Extensions.Widget.SetValue({ Value: value, WidgetId: widgetId });
 }
 
-function setSelfview(fsMode, mode, monitorRole){
+function setSelfview(fsMode, mode, monitorRole) {
   console.log(`Setting Selfview to fsMode: [${fsMode}] | mode: [${mode}] | monitorRole: [${monitorRole}]`)
   xapi.Command.Video.Selfview.Set({ FullscreenMode: fsMode, Mode: mode, OnMonitorRole: monitorRole });
 }
 
+function resumeSpeakerTrack() {
+  console.log(`resuming speakertrack....`)
+  xapi.Command.Cameras.SpeakerTrack.BackgroundMode.Deactivate().catch(handleError);
+}
+
+function pauseSpeakerTrack() {
+  console.log(`pausing speakertrack....`)
+  xapi.Command.Cameras.SpeakerTrack.BackgroundMode.Activate().catch(handleError);
+}
 
 /////////////////////////////////////////////////////////////////////////////////////////
 // TOUCH 10 UI FUNCTION HANDLERS
 /////////////////////////////////////////////////////////////////////////////////////////
 
 function processWidgets(event) {
-  switch (event.WidgetId){
+  switch (event.WidgetId) {
     case 'widget_toggle_auto':
       console.log(`Video Source Control to [${event.Value}]`);
       event.Value === 'off' ? stopAutomation() : startAutomation();
@@ -456,6 +574,9 @@ function processWidgets(event) {
 // OTHER FUNCTIONAL HANDLERS
 /////////////////////////////////////////////////////////////////////////////////////////
 
+function handleError(error) {
+  console.log(error);
+}
 
 function handleMicMuteOn() {
   console.log('handleMicMuteOn');
@@ -522,6 +643,17 @@ function restartNewSpeakerTimer() {
 function onNewSpeakerTimerExpired() {
   allowNewSpeaker = true;
 }
+
+// if the Speakertrack Camera becomes available after FW upgrade, we must re-init so
+// we register that action as an event handler
+xapi.Status.Cameras.SpeakerTrack.Availability
+  .on((value) => {
+    console.log("Event received for SpeakerTrack Availability: ", value)
+    if (value == "Available") {
+      stopAutomation();
+      init();
+    }
+  });
 
 
 /////////////////////////////////////////////////////////////////////////////////////////
