@@ -25,6 +25,8 @@ import xapi from 'xapi';
 
 const config = {
   monitorMics: [1, 2, 3, 4, 5, 6, 7, 8], // input connectors associated to the microphones being used in the room
+  ethernetMics: [11, 12, 13, 14], // IDs associated to Ethernet mics: e.j. 12 is Ethernet Mic 1, sub-ID 2
+  usbMics: [101], // Mic input connectors associated to the USB microphones being used in the main codec: 101 is USB Mic 1
   compositions: [        // Create your array of compositions
     {
       name: 'Composition1',     // Name for your composition
@@ -59,6 +61,36 @@ const config = {
 
   ]
 }
+
+
+/*
+// Set the camera_positions constant below if you wish to pre set pre set camera positions as like this example:
+
+const camera_positions = [
+  {
+    cameraID: 1,
+    pan: 1000,
+    tilt: 1000,
+    zoom: 100
+  },
+  {
+    cameraID: 3,
+    pan: 1500,
+    tilt: 1500,
+    zoom: 150
+  }
+]
+*/
+
+const camera_positions = []  // remove this line if you set specific values as per example above
+
+
+
+camera_positions.forEach(position => {
+  xapi.Command.Camera.PositionSet(
+    { CameraId: position.cameraID, Pan: position.pan, Tilt: position.tilt, Zoom: position.zoom });
+})
+
 
 const auto_top_speakers = {
   enabled: false, // if set to true, the macro will dynamically create composition of top speaker segments
@@ -181,7 +213,12 @@ xapi.Command.UserInterface.Extensions.Panel.Save({ PanelId: 'panel_vid_source_co
 let micArrays = {};
 // Initialize our micArray variable
 config.monitorMics.forEach(mic => micArrays[mic.toString()] = [0, 0, 0, 0])
-
+for (var i in config.ethernetMics) {
+  micArrays[config.ethernetMics[i].toString()] = [0, 0, 0, 0];
+}
+for (var i in config.usbMics) {
+  micArrays[config.usbMics[i].toString()] = [0, 0, 0, 0];
+}
 let lowWasRecalled = false;
 let lastActiveHighInput = 0;
 let allowSideBySide = true;
@@ -192,6 +229,8 @@ let newSpeakerTimer = null;
 let manual_mode = true;
 
 let micHandler = () => void 0;
+let micHandlerEthernet = () => void 0;
+let micHandlerUSB = () => void 0;
 
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -281,20 +320,58 @@ async function startAutomation() {
   allowCameraSwitching = true;
 
   //registering vuMeter event handler
-  micHandler = xapi.Event.Audio.Input.Connectors.Microphone.on(event => {
-    //adding protection for mis-configured mics
-    if (typeof micArrays[event.id[0]] != 'undefined') {
-      micArrays[event.id[0]].shift();
-      micArrays[event.id[0]].push(event.VuMeter);
+  if (config.monitorMics.length > 0)
+    micHandler = xapi.Event.Audio.Input.Connectors.Microphone.on(event => {
+      //adding protection for mis-configured mics
+      if (typeof micArrays[event.id[0]] != 'undefined') {
+        micArrays[event.id[0]].shift();
+        micArrays[event.id[0]].push(event.VuMeter);
 
-      // checking on manual_mode might be unnecessary because in manual mode,
-      // audio events should not be triggered
-      if (manual_mode == false) {
-        // invoke main logic to check mic levels ans switch to correct camera input
-        checkMicLevelsToSwitchCamera();
+        // checking on manual_mode might be unnecessary because in manual mode,
+        // audio events should not be triggered
+        if (manual_mode == false) {
+          // invoke main logic to check mic levels ans switch to correct camera input
+          checkMicLevelsToSwitchCamera();
+        }
       }
-    }
-  });
+    });
+
+
+  //registering vuMeter event handler for Ethernet mics
+  if (config.ethernetMics.length > 0)
+    micHandlerEthernet = xapi.event.on('Audio Input Connectors Ethernet', (event) => {
+      //console.log(event)
+      event.SubId.forEach(submic => {
+        if (typeof micArrays[event.id + submic.id] != 'undefined') {
+          micArrays[event.id + submic.id].shift();
+          micArrays[event.id + submic.id].push(submic.VuMeter);
+          if (manual_mode == false) {
+            // invoke main logic to check mic levels ans switch to correct camera input
+            checkMicLevelsToSwitchCamera();
+          }
+        }
+      })
+
+    });
+
+
+  //registering vuMeter event handler for USB mics
+  if (config.usbMics.length > 0)
+    micHandlerUSB = xapi.event.on('Audio Input Connectors USBMicrophone', (event) => {
+      //console.log(event)
+      if (typeof micArrays['10' + event.id] != 'undefined') {
+        micArrays['10' + event.id].shift();
+        micArrays['10' + event.id].push(event.VuMeter);
+
+        // checking on manual_mode might be unnecessary because in manual mode,
+        // audio events should not be triggered
+        if (manual_mode == false) {
+          // invoke main logic to check mic levels ans switch to correct camera input
+          checkMicLevelsToSwitchCamera();
+        }
+      }
+    });
+
   // start VuMeter monitoring
   console.log(`Turning on VuMeter monitoring for mics [${config.monitorMics}]`)
 
@@ -302,6 +379,35 @@ async function startAutomation() {
     xapi.Command.Audio.VuMeter.Start(
       { ConnectorId: mic, ConnectorType: 'Microphone', IntervalMs: 500, Source: 'AfterAEC' });
   })
+
+
+  let ethernetMicsStarted = [];
+  for (var i in config.ethernetMics) {
+    if (!ethernetMicsStarted.includes(parseInt(config.ethernetMics[i] / 10))) {
+      ethernetMicsStarted.push(parseInt(config.ethernetMics[i] / 10));
+      xapi.Command.Audio.VuMeter.Start(
+        {
+          ConnectorId: parseInt(config.ethernetMics[i] / 10),
+          ConnectorType: 'Ethernet',
+          IncludePairingQuality: 'Off',
+          IntervalMs: 500,
+          Source: 'AfterAEC'
+        });
+    }
+  }
+
+
+  for (var i in config.usbMics) {
+    xapi.Command.Audio.VuMeter.Start(
+      {
+        ConnectorId: config.usbMics[i] - 100,
+        ConnectorType: 'USBMicrophone',
+        IncludePairingQuality: 'Off',
+        IntervalMs: 500,
+        Source: 'AfterAEC'
+      });
+  }
+
 
   // set toggle button on custom panel to reflect that automation is turned on.
   setWidget('widget_toggle_auto', 'on')
@@ -327,6 +433,10 @@ function stopAutomation() {
   // using proper way to de-register handlers
   micHandler();
   micHandler = () => void 0;
+  micHandlerEthernet();
+  micHandlerEthernet = () => void 0;
+  micHandlerUSB();
+  micHandlerUSB = () => void 0;
 
   // set toggle button on custom panel to reflect that automation is turned off.
   setWidget('widget_toggle_auto', 'off')
@@ -454,6 +564,16 @@ function topNMicValue() {
 
   //NOTE: micArrays is indexed with string representations of integers that are the mic connector ID
   config.monitorMics.forEach(mic => {
+    theAverage = averageArray(micArrays[mic.toString()]);
+    averagesMap[mic] = theAverage;
+  })
+
+  config.ethernetMics.forEach(mic => {
+    theAverage = averageArray(micArrays[mic.toString()]);
+    averagesMap[mic] = theAverage;
+  })
+
+  config.usbMics.forEach(mic => {
     theAverage = averageArray(micArrays[mic.toString()]);
     averagesMap[mic] = theAverage;
   })

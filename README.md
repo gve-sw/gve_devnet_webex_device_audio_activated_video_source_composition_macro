@@ -2,12 +2,20 @@
 
 Macro to set main video source input composition on a Webex device based on which microphones detect audio activity.
 
+| RoomOs Minimum Version | Webex Cloud | Webex Edge (Hybrid Cloud) | On-Premise | Microsoft Teams Room On Cisco Devices |
+| ---------------------- | ----------- | ------------------------- | ---------- | ------------------------------------- |
+| 11.x                   | Yes         | Yes                       | Yes        | No - API Limitation                   |
+
 3/23/23 Updates:
 
 - Added Auto Top N composition feature
 - Added sample macros to install on Webex devices being used as video inputs (i.e. Webex Room Bar) so that they stay in full-screen self-view while speakertracking and never go standby.
 - Added QuadCam support.
 - Support for re-initializing the macro after a camera firmware update
+
+10/6/23 Updates:
+
+- Added support for Ethernet and USB microphones.
 
 ## Contacts
 
@@ -29,7 +37,11 @@ Macro to set main video source input composition on a Webex device based on whic
 1. Load the Javascript code included in the auto_source_composer.js file in this repository into a new Macro in the Macro editor of the Cisco Webex device you wish to use.
 2. Before activating the macro, modify the `config` constant if needed as follows:
 
-`monitorMics` is an array that should contain all microphones connected to the codec that we want to consider for the automatic switching logic. Default is all 8 mics in a Codec Pro but you can reduce it to only those being used for which the macro will turn on VuMeters and monitor.
+`monitorMics` is an array that should contain all analog microphones connected to the codec that we want to consider for the automatic switching logic. Default is all 8 analog mics in a Codec Pro but you can reduce it to only those being used for which the macro will turn on VuMeters and monitor.
+
+`ethernetMics` this is where you identify the ethernet microphone inputs that you want to monitor. Any Ethernet microphone input that is used to automate a camera selection is listed here. The macro supports up to 8 ethernet microphones with up to eight sub-ids and to remain compatible with the existing microphone handling functions we use the ranges 11-18, 21-28 and so forth until 81-88 where the first digit is the main Ethernet mic ID and the second digit is the subId. That way, to specify ethernet microphone 1 and it’s first 4 subIDs (this is what you would see if you only have one Cisco Microphone Pro connected to a codec) you would use [11,12,13,14] for this value.
+
+`usbMics` this is where you identify the connected USB microphone inputs that you want to monitor. Any USB microphone input that is used to automate a camera selection is listed here. The macro supports up to 4 USB microphones. To remain compatible with the existing microphone handling routines, USB microphones 1-4 should be specified using the range 101-104. This way, to monitor just one USB microphone connected to the codec, you would specify the value [101] for this constant.
 
 `compositions` is an array of objects that specify which connectors to use to compose the video inputs and which microphones need to have activity detected to trigger the new composition. Below is an example:
 
@@ -42,7 +54,7 @@ Macro to set main video source input composition on a Webex device based on whic
     }
 ```
 
-You can have as many compositions as you want, but the Codec Pro only has 8 mic connectors so you would only make sense to specify a maximum of 8. The default in the code is four compositions each triggered by 2 microphones. You can change the content of the `mics` array to specify which microphones are associated to a particular composition. That array can also have up to 8 values but it is more typical it will have 1 or 2.  
+You can have as many compositions as you want, but the Codec Pro has 8 analog mic connectors, can have up to 8 Ethernet mics with 8 sub-ids each and up to 4 USB Mics (currently limite to 1 USB mic) so you would only make sense to specify a maximum of 73. The default in the code is four compositions each triggered by 2 microphones. You can change the content of the `mics` array to specify which microphones are associated to a particular composition. That array can also have up to 8 values but it is more typical it will have 1 or 2.  
 The value for the `connectors` key in the object is an array of connector IDs to use in the `xapi.Command.Video.Input.SetMainVideoSource()` command. They will be specified when issuing the command to change layouts in the same order as you configure here. There is a maximum of 4 connector IDs you can specify.
 The value for the `layout` key in the object specifies the type of layout to select when using the `xapi.Command.Video.Input.SetMainVideoSource()` command to set the new composition as the main video source.  
 Do not change the names of any of the keys in the object nor the number of keys since the macro looks for the ones described here explicitely.
@@ -69,6 +81,12 @@ const auto_top_speakers = {
   default_connectors: [1, 2, 3, 4], // specify connectos to use for top speakers composition in order
   layout: 'Equal'
 }
+```
+
+If you wish to hard code camera positions when the macro starts, modify the `camera_positions` constant with valed CameraID, pan, tilt and zoom values as seen in the example in the code. If you do not wish to do this, just leave that constant as an empty array as such:
+
+```
+const camera_positions = []
 ```
 
 You also might want to modify the following constants:
